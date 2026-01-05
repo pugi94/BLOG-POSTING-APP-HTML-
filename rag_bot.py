@@ -24,21 +24,19 @@ else:
     st.stop()
 
 # --- 2. RAG 두뇌 클래스 ---
+# --- 2. RAG 두뇌 클래스 (전체 현황 인식 기능 추가) ---
 class CompanyBrain:
     def __init__(self):
         self.vector_store = None
-        
-        # ⭐ 사용자가 발견한 최신 모델 ID 적용!
-        # 만약 구글이 이 이름을 열어뒀다면, 엄청난 성능을 보여줄 겁니다.
-        self.llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", temperature=0.3)
-        
+        self.total_docs_count = 0  # ⭐ 전체 문서 개수를 저장할 변수 추가
+        self.llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.3)
         self.load_db()
 
     def load_db(self):
-        """특정 폴더 안에 있는 모든 구글 시트 파일을 읽어서 지식으로 만듭니다."""
+        """구글 드라이브 폴더 내 모든 시트 데이터를 읽어옵니다."""
         print("📥 그룹디 지식 DB 동기화 중...")
         
-        # ▼▼▼ 지정하신 폴더 ID 유지 ▼▼▼
+        # ▼▼▼ 폴더 ID 유지 ▼▼▼
         TARGET_FOLDER_ID = "1_sddYuhDRy1plDrCyA8GtKItQqVj4ULf" 
         
         try:
@@ -47,7 +45,6 @@ class CompanyBrain:
             client = gspread.authorize(creds)
             drive_service = build('drive', 'v3', credentials=creds)
             
-            # 폴더 내 시트 검색
             query = f"'{TARGET_FOLDER_ID}' in parents and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false"
             results = drive_service.files().list(q=query, fields="files(id, name)").execute()
             items = results.get('files', [])
@@ -61,7 +58,6 @@ class CompanyBrain:
                 file_id = item['id']
                 file_name = item['name']
                 try:
-                    # print(f"📖 '{file_name}' 읽는 중...") 
                     sh = client.open_by_key(file_id) 
                     for worksheet in sh.worksheets():
                         title = worksheet.title
@@ -73,6 +69,9 @@ class CompanyBrain:
                     continue
 
             if documents:
+                # ⭐ 여기서 전체 개수를 세어서 저장합니다!
+                self.total_docs_count = len(documents)
+                
                 embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
                 self.vector_store = FAISS.from_documents(documents, embeddings)
                 print(f"✅ 총 {len(documents)}개의 문서를 학습했습니다.")
@@ -84,25 +83,27 @@ class CompanyBrain:
 
     def ask(self, query):
         if not self.vector_store:
-            return "아직 그룹디 지식 DB가 준비되지 않았어요. 잠시 후 다시 시도해주세요!", []
+            return "아직 그룹디 지식 DB가 준비되지 않았어요.", []
             
-        # ⭐ [수정됨] 그룹디(GroupD) 전용 페르소나 적용
-        prompt_template = """
+        # ⭐ [수정됨] 프롬프트에 '전체 데이터 개수' 정보를 심어줍니다.
+        # 이제 AI는 검색된 4개뿐만 아니라, 전체 규모도 알고 대답합니다.
+        prompt_template = f"""
         당신은 '그룹디(GroupD)'의 유능하고 센스 있는 AI 비서입니다.
-        아래 [회사의 지식]을 참고해서 질문에 답변해 주세요.
         
+        [현재 DB 현황]:
+        - 연동된 총 데이터 개수: {self.total_docs_count}개
+        (사용자가 "전체 몇 개야?"라고 물으면 위 숫자를 답하세요. 검색된 문서 개수(4개)로 답하지 마세요.)
+
         [행동 지침]:
         1. 질문이 [회사의 지식]에 있는 업무 내용이라면, 정확하고 전문적으로 답변하세요.
-        2. 질문이 "안녕", "고마워", "너 누구야?" 같은 일상 대화라면, 문서에 없더라도 친절하고 재치 있게 대화하세요. 
-           (예: "안녕하세요! 그룹디의 든든한 AI 비서입니다. 무엇을 도와드릴까요?")
-        3. 문서에 없는 내용을 억지로 지어내지 마세요. 모르면 솔직하게 모른다고 하고 담당자에게 문의하라고 안내하세요.
-        4. 답변은 항상 '해요체'(존댓말)로 정중하고 친절하게 하세요.
+        2. 질문이 일상 대화라면 친절하고 재치 있게 대화하세요.
+        3. 답변은 항상 '해요체'(존댓말)로 정중하고 친절하게 하세요.
 
-        [회사의 지식]:
-        {context}
+        [회사의 지식 (검색된 일부 내용)]:
+        {{context}}
 
         [사용자 질문]:
-        {question}
+        {{question}}
 
         [답변]:
         """
