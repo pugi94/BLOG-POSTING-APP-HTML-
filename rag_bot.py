@@ -36,7 +36,7 @@ class CompanyBrain:
         print("📥 통합 지식 DB 동기화 중...")
         
         # ▼▼▼ 여기에 복사한 폴더 ID를 넣으세요 ▼▼▼
-        TARGET_FOLDER_ID = "여기에_폴더_ID_복사_붙여넣기" 
+        TARGET_FOLDER_ID = "1_sddYuhDRy1plDrCyA8GtKItQqVj4ULf" 
         
         try:
             scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
