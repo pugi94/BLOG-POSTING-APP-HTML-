@@ -27,8 +27,11 @@ else:
 class CompanyBrain:
     def __init__(self):
         self.vector_store = None
-        # ⚠️ 3.0을 쓰면 에러가 납니다! 현재 API에서 가장 안정적인 최신 버전은 1.5입니다.
-        self.llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.3)
+        
+        # ⭐ 사용자가 발견한 최신 모델 ID 적용!
+        # 만약 구글이 이 이름을 열어뒀다면, 엄청난 성능을 보여줄 겁니다.
+        self.llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", temperature=0.3)
+        
         self.load_db()
 
     def load_db(self):
