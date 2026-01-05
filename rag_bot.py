@@ -10,8 +10,8 @@ from langchain_core.documents import Document
 from langchain.chains import RetrievalQA
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
+from langchain.prompts import PromptTemplate
 import threading
-
 # --- 1. 클라우드 환경 설정 (Secrets에서 키 가져오기) ---
 if "GOOGLE_API_KEY" in st.secrets:
     os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
