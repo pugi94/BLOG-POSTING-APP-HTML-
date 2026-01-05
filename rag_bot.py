@@ -27,8 +27,8 @@ else:
 class CompanyBrain:
     def __init__(self):
         self.vector_store = None
-        # 대화형 AI니까 창의성을 0.3으로 설정 (너무 딱딱하지 않게)
-        self.llm = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.3)
+        # ⚠️ 3.0을 쓰면 에러가 납니다! 현재 API에서 가장 안정적인 최신 버전은 1.5입니다.
+        self.llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.3)
         self.load_db()
 
     def load_db(self):
