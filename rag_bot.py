@@ -27,14 +27,15 @@ else:
 class CompanyBrain:
     def __init__(self):
         self.vector_store = None
+        # 대화형 AI니까 창의성을 0.3으로 설정 (너무 딱딱하지 않게)
         self.llm = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.3)
         self.load_db()
 
     def load_db(self):
         """특정 폴더 안에 있는 모든 구글 시트 파일을 읽어서 지식으로 만듭니다."""
-        print("📥 통합 지식 DB 동기화 중...")
+        print("📥 그룹디 지식 DB 동기화 중...")
         
-        # ▼▼▼ 여기에 복사한 폴더 ID를 넣으세요 ▼▼▼
+        # ▼▼▼ 지정하신 폴더 ID 유지 ▼▼▼
         TARGET_FOLDER_ID = "1_sddYuhDRy1plDrCyA8GtKItQqVj4ULf" 
         
         try:
@@ -43,6 +44,7 @@ class CompanyBrain:
             client = gspread.authorize(creds)
             drive_service = build('drive', 'v3', credentials=creds)
             
+            # 폴더 내 시트 검색
             query = f"'{TARGET_FOLDER_ID}' in parents and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false"
             results = drive_service.files().list(q=query, fields="files(id, name)").execute()
             items = results.get('files', [])
@@ -56,7 +58,7 @@ class CompanyBrain:
                 file_id = item['id']
                 file_name = item['name']
                 try:
-                    # print(f"📖 '{file_name}' 읽는 중...") # 로그가 너무 많으면 주석 처리
+                    # print(f"📖 '{file_name}' 읽는 중...") 
                     sh = client.open_by_key(file_id) 
                     for worksheet in sh.worksheets():
                         title = worksheet.title
@@ -79,17 +81,19 @@ class CompanyBrain:
 
     def ask(self, query):
         if not self.vector_store:
-            return "아직 지식 DB가 준비되지 않았어요. 잠시 후 다시 시도해주세요!", []
+            return "아직 그룹디 지식 DB가 준비되지 않았어요. 잠시 후 다시 시도해주세요!", []
             
+        # ⭐ [수정됨] 그룹디(GroupD) 전용 페르소나 적용
         prompt_template = """
-        당신은 회사의 유능하고 친절한 AI 비서입니다.
+        당신은 '그룹디(GroupD)'의 유능하고 센스 있는 AI 비서입니다.
         아래 [회사의 지식]을 참고해서 질문에 답변해 주세요.
         
-        규칙:
-        1. [회사의 지식]에 있는 내용이라면, 그 내용을 바탕으로 상세하게 답변하세요.
-        2. [회사의 지식]과 관련 없는 일상적인 대화(인사, 농담 등)라면, 당신의 AI 능력을 발휘해 자연스럽고 재치 있게 대화하세요.
-        3. 모르는 내용은 솔직하게 모른다고 하고, 지어내지 마세요.
-        4. 답변은 항상 친절한 존댓말로 해주세요.
+        [행동 지침]:
+        1. 질문이 [회사의 지식]에 있는 업무 내용이라면, 정확하고 전문적으로 답변하세요.
+        2. 질문이 "안녕", "고마워", "너 누구야?" 같은 일상 대화라면, 문서에 없더라도 친절하고 재치 있게 대화하세요. 
+           (예: "안녕하세요! 그룹디의 든든한 AI 비서입니다. 무엇을 도와드릴까요?")
+        3. 문서에 없는 내용을 억지로 지어내지 마세요. 모르면 솔직하게 모른다고 하고 담당자에게 문의하라고 안내하세요.
+        4. 답변은 항상 '해요체'(존댓말)로 정중하고 친절하게 하세요.
 
         [회사의 지식]:
         {context}
@@ -111,12 +115,12 @@ class CompanyBrain:
         result = qa_chain.invoke({"query": query})
         return result["result"], result["source_documents"]
 
-# ⭐ [핵심 수정] 두뇌를 전역 캐시에 저장합니다 (모든 스레드 공유)
+# ⭐ [핵심] 두뇌를 전역 캐시에 저장 (슬랙 봇 접속 오류 해결)
 @st.cache_resource
 def get_brain():
     return CompanyBrain()
 
-# 두뇌 로딩 (이제 brain 변수는 어디서든 접근 가능)
+# 두뇌 로딩
 brain = get_brain()
 
 # --- 3. 슬랙 봇 로직 ---
@@ -126,11 +130,10 @@ app = App(token=SLACK_BOT_TOKEN)
 def handle_message(message, say):
     query = message['text']
     
-    # 로딩 중 메시지 (선택 사항)
-    # say(f"🔍...", thread_ts=message['ts'])
+    # 로딩 중 메시지 (필요시 주석 해제)
+    # say(f"🔍 '{query}' 확인 중...", thread_ts=message['ts'])
     
     try:
-        # ⭐ [수정됨] st.session_state 대신 전역 brain 변수 사용
         answer, sources = brain.ask(query)
         
         source_text = ""
@@ -156,12 +159,12 @@ def run_slack_bot():
     except Exception as e:
         print(f"봇 실행 에러: {e}")
 
-st.title("🤖 사내 지식 봇 컨트롤러")
+st.title("🤖 그룹디(GroupD) 지식 봇 컨트롤러")
 st.info("이 화면이 켜져 있으면 봇이 작동합니다.")
 
 # DB 업데이트 버튼
 if st.button("🔄 지식 DB 업데이트"):
-    brain.load_db() # 전역 brain 객체를 바로 업데이트
+    brain.load_db() 
     st.success("최신 데이터를 반영했습니다!")
 
 if 'bot_thread' not in st.session_state:
