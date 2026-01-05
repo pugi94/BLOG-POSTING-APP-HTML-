@@ -25,16 +25,21 @@ else:
 
 # --- 2. RAG 두뇌 클래스 ---
 # --- 2. RAG 두뇌 클래스 (전체 현황 인식 기능 추가) ---
+# --- 2. RAG 두뇌 클래스 (Gemini 3.0 Preview 적용) ---
 class CompanyBrain:
     def __init__(self):
         self.vector_store = None
-        self.total_docs_count = 0  # ⭐ 전체 문서 개수를 저장할 변수 추가
-        self.llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.3)
+        self.total_docs_count = 0
+        
+        # ⭐ [핵심 변경] 모델을 'gemini-3-flash-preview'로 설정
+        # (만약 400/404 에러가 나면, 아직 API가 안 열린 것이니 1.5로 돌아가야 합니다)
+        self.llm = ChatGoogleGenerativeAI(model="gemini-3-flash-preview", temperature=0.3)
+        
         self.load_db()
 
     def load_db(self):
-        """구글 드라이브 폴더 내 모든 시트 데이터를 읽어옵니다."""
-        print("📥 그룹디 지식 DB 동기화 중...")
+        """폴더 내의 '스프레드시트'와 'Google 문서'를 모두 읽어옵니다."""
+        print("📥 그룹디 지식 DB 동기화 중 (Gemini 3.0)...")
         
         # ▼▼▼ 폴더 ID 유지 ▼▼▼
         TARGET_FOLDER_ID = "1_sddYuhDRy1plDrCyA8GtKItQqVj4ULf" 
@@ -42,64 +47,77 @@ class CompanyBrain:
         try:
             scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
             creds = ServiceAccountCredentials.from_json_keyfile_dict(GCP_KEY_DICT, scope)
+            
             client = gspread.authorize(creds)
             drive_service = build('drive', 'v3', credentials=creds)
             
-            query = f"'{TARGET_FOLDER_ID}' in parents and mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false"
-            results = drive_service.files().list(q=query, fields="files(id, name)").execute()
+            # 시트(spreadsheet) 또는 문서(document) 모두 검색
+            query = f"'{TARGET_FOLDER_ID}' in parents and (mimeType = 'application/vnd.google-apps.spreadsheet' or mimeType = 'application/vnd.google-apps.document') and trashed = false"
+            
+            results = drive_service.files().list(q=query, fields="files(id, name, mimeType)").execute()
             items = results.get('files', [])
 
             if not items:
-                print("⚠️ 폴더 안에 시트가 없습니다.")
+                print("⚠️ 폴더 안에 파일이 없습니다.")
                 return
 
             documents = []
+            
             for item in items:
                 file_id = item['id']
                 file_name = item['name']
+                mime_type = item['mimeType']
+                
                 try:
-                    sh = client.open_by_key(file_id) 
-                    for worksheet in sh.worksheets():
-                        title = worksheet.title
-                        records = worksheet.get_all_records()
-                        for row in records:
-                            content_str = f"[{file_name}-{title}] " + " / ".join([f"{k}: {v}" for k, v in row.items()])
-                            documents.append(Document(page_content=content_str))
-                except Exception:
+                    # 1. 스프레드시트
+                    if 'spreadsheet' in mime_type:
+                        sh = client.open_by_key(file_id) 
+                        for worksheet in sh.worksheets():
+                            title = worksheet.title
+                            records = worksheet.get_all_records()
+                            for row in records:
+                                content_str = f"[시트: {file_name}-{title}] " + " / ".join([f"{k}: {v}" for k, v in row.items()])
+                                documents.append(Document(page_content=content_str))
+                                
+                    # 2. Google 문서
+                    elif 'document' in mime_type:
+                        content = drive_service.files().export(fileId=file_id, mimeType='text/plain').execute().decode('utf-8')
+                        if len(content.strip()) > 10:
+                            doc_str = f"[문서: {file_name}] \n{content}"
+                            documents.append(Document(page_content=doc_str))
+                            
+                except Exception as e:
+                    print(f"⚠️ '{file_name}' 읽기 실패: {e}")
                     continue
 
             if documents:
-                # ⭐ 여기서 전체 개수를 세어서 저장합니다!
                 self.total_docs_count = len(documents)
-                
                 embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
                 self.vector_store = FAISS.from_documents(documents, embeddings)
-                print(f"✅ 총 {len(documents)}개의 문서를 학습했습니다.")
+                print(f"✅ 총 {len(documents)}개의 지식(행+문서)을 학습했습니다.")
             else:
-                print("⚠️ 데이터 없음")
+                print("⚠️ 읽어올 데이터가 없습니다.")
 
         except Exception as e:
             print(f"❌ DB 로딩 실패: {e}")
 
     def ask(self, query):
         if not self.vector_store:
-            return "아직 그룹디 지식 DB가 준비되지 않았어요.", []
+            return "아직 지식 DB가 준비되지 않았어요.", []
             
-        # ⭐ [수정됨] 프롬프트에 '전체 데이터 개수' 정보를 심어줍니다.
-        # 이제 AI는 검색된 4개뿐만 아니라, 전체 규모도 알고 대답합니다.
         prompt_template = f"""
-        당신은 '그룹디(GroupD)'의 유능하고 센스 있는 AI 비서입니다.
+        당신은 '그룹디(GroupD)'의 유능하고 센스 있는 AI 비서입니다. (모델: Gemini 3.0 Preview)
         
         [현재 DB 현황]:
-        - 연동된 총 데이터 개수: {self.total_docs_count}개
-        (사용자가 "전체 몇 개야?"라고 물으면 위 숫자를 답하세요. 검색된 문서 개수(4개)로 답하지 마세요.)
+        - 학습된 지식 데이터 총 개수: {self.total_docs_count}건
+        (사용자가 "전체 몇 개야?"라고 물으면 위 숫자를 답하세요.)
 
         [행동 지침]:
         1. 질문이 [회사의 지식]에 있는 업무 내용이라면, 정확하고 전문적으로 답변하세요.
         2. 질문이 일상 대화라면 친절하고 재치 있게 대화하세요.
         3. 답변은 항상 '해요체'(존댓말)로 정중하고 친절하게 하세요.
 
-        [회사의 지식 (검색된 일부 내용)]:
+        [회사의 지식]:
         {{context}}
 
         [사용자 질문]:
@@ -118,7 +136,6 @@ class CompanyBrain:
         
         result = qa_chain.invoke({"query": query})
         return result["result"], result["source_documents"]
-
 # ⭐ [핵심] 두뇌를 전역 캐시에 저장 (슬랙 봇 접속 오류 해결)
 @st.cache_resource
 def get_brain():
